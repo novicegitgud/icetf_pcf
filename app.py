@@ -182,59 +182,101 @@ def create_pdf(
     final_cash: float,
     result_df: pd.DataFrame,
 ) -> bytes:
+
     buffer = io.BytesIO()
+
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=15 * mm,
-        rightMargin=15 * mm,
-        topMargin=15 * mm,
-        bottomMargin=15 * mm,
+        leftMargin=20 * mm,
+        rightMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
     )
 
     styles = getSampleStyleSheet()
+    title_style = styles["Title"]
+    header_style = styles["Heading2"]
+    normal_style = styles["Normal"]
+
     story = []
 
-    story.append(Paragraph("ETF Creation / Redemption Request", styles["Title"]))
+    # ----------------------------
+    # Header
+    # ----------------------------
+    story.append(Paragraph("ETF CREATION / REDEMPTION REQUEST", title_style))
+    story.append(Spacer(1, 8))
+
+    story.append(Paragraph(f"Generated on: {request_date}", normal_style))
+    story.append(Spacer(1, 12))
+
+    # ----------------------------
+    # Request details
+    # ----------------------------
+    story.append(Paragraph("Request Details", header_style))
     story.append(Spacer(1, 6))
 
     details = [
-        ["AP Name", ap_name or ""],
-        ["Reference", request_reference or ""],
-        ["Request Date", str(request_date)],
-        ["Settlement Date", str(settlement_date)],
+        ["AP Name", ap_name or "-"],
+        ["Reference", request_reference or "-"],
         ["ETF", etf],
         ["Transaction Type", transaction_label],
         ["Basket Date", str(basket_date)],
+        ["Settlement Date", str(settlement_date)],
         ["ETF Units", f"{units:,.0f}"],
         ["Cash Currency", cash_currency],
-        ["Base Cash Component", f"{base_cash_scaled:,.2f} {cash_currency}"],
-        ["Final Cash Component", f"{final_cash:,.2f} {cash_currency}"],
     ]
 
-    details_table = Table(details, colWidths=[45 * mm, 120 * mm])
+    details_table = Table(details, colWidths=[60 * mm, 90 * mm])
     details_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f0f0f0")),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("PADDING", (0, 0), (-1, -1), 4),
+        ("PADDING", (0, 0), (-1, -1), 5),
     ]))
-    story.append(details_table)
-    story.append(Spacer(1, 10))
 
-    if comments:
-        story.append(Paragraph(f"<b>Comments:</b> {comments}", styles["BodyText"]))
-        story.append(Spacer(1, 8))
+    story.append(details_table)
+    story.append(Spacer(1, 14))
+
+    # ----------------------------
+    # Cash summary (highlighted)
+    # ----------------------------
+    story.append(Paragraph("Cash Summary", header_style))
+    story.append(Spacer(1, 6))
+
+    cash_data = [
+        ["Base Cash", f"{base_cash_scaled:,.2f} {cash_currency}"],
+        ["Final Cash", f"{final_cash:,.2f} {cash_currency}"],
+    ]
+
+    cash_table = Table(cash_data, colWidths=[60 * mm, 90 * mm])
+    cash_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#e8f0ff")),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("FONTNAME", (1, 1), (1, 1), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    story.append(cash_table)
+    story.append(Spacer(1, 14))
+
+    # ----------------------------
+    # Basket table
+    # ----------------------------
+    story.append(Paragraph("Basket Details", header_style))
+    story.append(Spacer(1, 6))
 
     table_data = [[
-        "Ticker", "ISIN", "Currency", "Ideal Qty", "Default Qty", "AP Input Qty", "Difference", "Cash Adjustment"
+        "Ticker", "CCY", "Ideal", "Default", "AP Input", "Difference", "Cash Adj"
     ]]
 
     for _, row in result_df.iterrows():
         table_data.append([
             str(row["Ticker"]),
-            str(row["ISIN"]),
             str(row["Currency"]),
             f"{row['Ideal_Quantity']:,.4f}",
             f"{int(row['Default_AP_Quantity']):,}",
@@ -244,46 +286,72 @@ def create_pdf(
         ])
 
     basket_table = Table(table_data, repeatRows=1)
+
     basket_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d9d9d9")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("PADDING", (0, 0), (-1, -1), 3),
+        ("PADDING", (0, 0), (-1, -1), 4),
+        ("ALIGN", (2, 1), (-1, -1), "RIGHT"),
     ]))
 
-    story.append(Paragraph("Basket Details", styles["Heading2"]))
     story.append(basket_table)
-    story.append(Spacer(1, 18))
+    story.append(Spacer(1, 16))
 
-    changed_rows = result_df[result_df["Changed_By_AP"]].copy()
+    # ----------------------------
+    # Changed rows section
+    # ----------------------------
+    changed_rows = result_df[result_df["Changed_By_AP"]]
+
     if not changed_rows.empty:
-        story.append(Paragraph("Rows Changed by AP", styles["Heading2"]))
-        changed_table_data = [["Ticker", "Default Qty", "AP Input Qty", "Delta vs Default"]]
+        story.append(Paragraph("Changes Made by AP", header_style))
+        story.append(Spacer(1, 6))
+
+        change_data = [["Ticker", "Default", "AP Input", "Delta"]]
+
         for _, row in changed_rows.iterrows():
-            changed_table_data.append([
-                str(row["Ticker"]),
-                f"{int(row['Default_AP_Quantity']):,}",
-                f"{int(row['AP_Input_Quantity']):,}",
-                f"{int(row['Delta_vs_Default']):,}",
+            change_data.append([
+                row["Ticker"],
+                f"{int(row['Default_AP_Quantity'])}",
+                f"{int(row['AP_Input_Quantity'])}",
+                f"{int(row['Delta_vs_Default'])}",
             ])
 
-        changed_table = Table(changed_table_data, repeatRows=1)
-        changed_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        change_table = Table(change_data, repeatRows=1)
+        change_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#ffe6e6")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
             ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("PADDING", (0, 0), (-1, -1), 3),
+            ("PADDING", (0, 0), (-1, -1), 4),
         ]))
-        story.append(changed_table)
-        story.append(Spacer(1, 12))
 
-    story.append(Paragraph("Authorized Participant Signature: ____________________________", styles["BodyText"]))
+        story.append(change_table)
+        story.append(Spacer(1, 14))
+
+    # ----------------------------
+    # Comments
+    # ----------------------------
+    if comments:
+        story.append(Paragraph("Comments", header_style))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(comments, normal_style))
+        story.append(Spacer(1, 14))
+
+    # ----------------------------
+    # Signatures
+    # ----------------------------
+    story.append(Paragraph("Signatures", header_style))
     story.append(Spacer(1, 10))
-    story.append(Paragraph("ETF Manager Signature: ______________________________________", styles["BodyText"]))
+
+    story.append(Paragraph("Authorized Participant: ________________________________", normal_style))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("ETF Manager: ____________________________________________", normal_style))
 
     doc.build(story)
+
     pdf_bytes = buffer.getvalue()
     buffer.close()
+
     return pdf_bytes
 
 
